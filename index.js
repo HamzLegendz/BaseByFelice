@@ -6,7 +6,6 @@
 //==  (  ✩ 🚀 Note: Kembangkan Saja Kalo Mau jangan Apus Pembuat Base -_
 
 require("./config/settings");
-
 const pino = require("pino");
 const { Boom } = require("@hapi/boom");
 const axios = require("axios");
@@ -20,6 +19,7 @@ const {
 	useMultiFileAuthState,
 	DisconnectReason,
 	downloadContentFromMessage,
+	fetchLatestBaileysVersion,
 	makeInMemoryStore,
 	jidDecode,
 	proto,
@@ -39,7 +39,8 @@ const {
 	writeExifVid,
 } = require("./lib/watermark");
 
-
+const { version, isLatest } = await fetchLatestBaileysVersion()
+console.log(chalk.magenta(`-- Using WA v${version.join('.')}, isLatest: ${isLatest} --`))
 const pairingCode = true
 
 const rl = readline.createInterface({
@@ -65,27 +66,27 @@ async function clientstart() {
         keepAliveIntervalMs: 10000,
         generateHighQualityLinkPreview: true,
         patchMessageBeforeSending: (message) => {
-            const requiresPatch = !!(
-                message.buttonsMessage ||
-                message.templateMessage ||
-                message.listMessage
-            );
-            if (requiresPatch) {
-                message = {
-                    viewOnceMessage: {
-                        message: {
-                            messageContextInfo: {
-                                deviceListMetadataVersion: 2,
-                                deviceListMetadata: {},
-                            },
-                            ...message,
-                        },
-                    },
-                };
-            }
-            return message;
-        },
-        version: (await (await fetch('https://raw.githubusercontent.com/WhiskeySockets/Baileys/master/src/Defaults/baileys-version.json')).json()).version,
+		const requiresPatch = !!(
+			message.buttonsMessage 
+			|| message.templateMessage
+			|| message.listMessage
+		);
+		if (requiresPatch) {
+			message = {
+				viewOnceMessage: {
+					message: {
+						messageContextInfo: {
+							deviceListMetadataVersion: 2,
+							deviceListMetadata: {}
+						},
+						...message
+					}
+				}
+			}
+		}
+		return message;
+	},
+        version,
         browser: ["Ubuntu", "Chrome", "20.0.04"],
         logger: pino({
             level: 'fatal'
@@ -105,7 +106,6 @@ async function clientstart() {
         console.log(`your pairing code: ${code}`);
     }
     
-
     const store = makeInMemoryStore({
         logger: pino().child({ 
             level: 'silent',
@@ -132,9 +132,15 @@ async function clientstart() {
 	vynnoxbeyours.public = global.status
     
     vynnoxbeyours.ev.on('connection.update', (update) => {
-		 const { NevariaConnect } = require('./lib/connect')
-		 NevariaConnect({ vynnoxbeyours, update, clientstart, DisconnectReason, Boom })
-    })
+    const { connection, lastDisconnect } = update;
+    if (connection === 'close') {
+        let reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
+        if (reason === DisconnectReason.connectionLost || reason === DisconnectReason.timedOut) {
+            console.log(chalk.yellow("Reconnecting..."));
+            clientstart();
+        }
+    }
+});
 
     vynnoxbeyours.decodeJid = (jid) => {
         if (!jid) return jid;
@@ -236,6 +242,7 @@ async function clientstart() {
 			caption,
 			mimetype,
 			fileName,
+
 			...options,
 		}, {
 			quoted,
